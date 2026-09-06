@@ -17,6 +17,11 @@ $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($ApplicationDirectory)) {
     $ApplicationDirectory = Split-Path -Parent $PSScriptRoot
 }
+# Defend against launcher quoting bugs: a stray quote or trailing backslash
+# in the argument turns GetFullPath into "Illegal characters in path".
+$ApplicationDirectory = $ApplicationDirectory.Trim('"')
+$DataDirectory = $DataDirectory.Trim('"')
+$ConfigPath = $ConfigPath.Trim('"')
 $applicationRoot = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\')
 if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
     $DataDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Agent_b'

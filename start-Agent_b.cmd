@@ -16,6 +16,9 @@ if not defined AGENTB_HIDDEN_REENTRY (
 )
 
 set "AGENTB_ROOT=%~dp0"
+REM %~dp0 ends with a backslash; strip it so quoted PowerShell paths below
+REM never produce the \" escape sequence that breaks argument parsing.
+if "%AGENTB_ROOT:~-1%"=="\" set "AGENTB_ROOT=%AGENTB_ROOT:~0,-1%"
 set "GO_EXE="
 set "AGENTB_AUTO_CLOSE=0"
 for %%A in (%*) do (
@@ -24,16 +27,16 @@ for %%A in (%*) do (
 )
 
 if defined AGENTB_GO if exist "%AGENTB_GO%" set "GO_EXE=%AGENTB_GO%"
-if not defined GO_EXE if exist "%AGENTB_ROOT%.tools\go\bin\go.exe" set "GO_EXE=%AGENTB_ROOT%.tools\go\bin\go.exe"
+if not defined GO_EXE if exist "%AGENTB_ROOT%\.tools\go\bin\go.exe" set "GO_EXE=%AGENTB_ROOT%\.tools\go\bin\go.exe"
 if not defined GO_EXE for /f "delims=" %%G in ('where go.exe 2^>nul') do if not defined GO_EXE set "GO_EXE=%%G"
 
 if /i "%~1"=="--check" goto check
 
 if defined GO_EXE (
   echo Building Agent_b...
-  "%GO_EXE%" build -o "%AGENTB_ROOT%Agent_b.exe" ./cmd/harness
+  "%GO_EXE%" build -o "%AGENTB_ROOT%\Agent_b.exe" ./cmd/harness
   if errorlevel 1 goto build_failed
-) else if not exist "%AGENTB_ROOT%Agent_b.exe" (
+) else if not exist "%AGENTB_ROOT%\Agent_b.exe" (
   goto go_missing
 )
 
@@ -42,7 +45,7 @@ if /i "%~1"=="--build-only" (
   exit /b 0
 )
 
-powershell.exe -NoLogo -NoProfile -File "%AGENTB_ROOT%scripts\launch-Agent_b.ps1" -ApplicationDirectory "%AGENTB_ROOT%" -DataDirectory "%AGENTB_ROOT%" -ConfigPath "%AGENTB_ROOT%harness.json" %*
+powershell.exe -NoLogo -NoProfile -File "%AGENTB_ROOT%\scripts\launch-Agent_b.ps1" -ApplicationDirectory "%AGENTB_ROOT%" -DataDirectory "%AGENTB_ROOT%" -ConfigPath "%AGENTB_ROOT%\harness.json" %*
 set "AGENTB_EXIT=%ERRORLEVEL%"
 if not "%AGENTB_EXIT%"=="0" (
   echo.
