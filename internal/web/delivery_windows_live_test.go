@@ -149,7 +149,7 @@ func TestDeliveryLiveServiceSplit(t *testing.T) {
 	})
 	scheduler := agent.NewScheduler(runner, registry, bus, server.ConfigSnapshot)
 	server.SetRuntime(scheduler, runner, renderer)
-	item, err := registry.Create("main", "live", workspace)
+	item, err := registry.Create("main", "", "live", workspace)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,6 +25,13 @@
       <a id="chat-settings" class="chat-icon-button" href="/#settings/servers" aria-label="Settings" title="Settings">⚙</a>
     </nav>
   </header>
+  <div id="chat-new-session" class="chat-new-session-row" hidden>
+    <span class="chat-new-session-caption">New session</span>
+    <input class="chat-new-session-label" value="new session" aria-label="New session label">
+    <select class="chat-new-session-agent" aria-label="New session agent"></select>
+    <button class="chat-new-session-create" type="button">Create</button>
+    <button class="chat-new-session-cancel" type="button">Cancel</button>
+  </div>
   <div id="chat-budget" class="chat-budget" aria-label="Context budget"><span class="chat-budget-fill"></span><span class="chat-budget-tip"></span></div>
   <main id="chat-log" class="chat-log" tabindex="0" aria-live="polite"></main>
   <footer class="chat-composer">

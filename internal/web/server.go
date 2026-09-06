@@ -145,6 +145,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/sessions", s.replayGuard(s.sessions))
 	mux.HandleFunc("/api/sessions/", s.replayGuard(s.session))
 	mux.HandleFunc("/api/servers", s.servers)
+	mux.HandleFunc("/api/agents", s.replayGuard(s.agents))
 	mux.HandleFunc("/api/servers/", s.replayGuard(s.server))
 	mux.HandleFunc("/api/config", s.replayGuard(s.config))
 	mux.HandleFunc("/api/shell-credential", s.replayGuard(s.shellCredential))
@@ -560,6 +561,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var body struct {
 			Label     string `json:"label"`
+			AgentID   string `json:"agent_id"`
 			ServerID  string `json:"server_id"`
 			Workspace string `json:"workspace"`
 		}
@@ -578,11 +580,23 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			body.ServerID = s.cfg.Roles.Main
 			s.mu.RUnlock()
 		}
+		if body.AgentID != "" {
+			s.mu.RLock()
+			item, ok := s.cfg.Agent(body.AgentID)
+			s.mu.RUnlock()
+			if !ok {
+				writeError(w, 400, "unknown agent "+body.AgentID, "agent_id")
+				return
+			}
+			if item.ServerID != "" {
+				body.ServerID = item.ServerID
+			}
+		}
 		if runnable, reason := s.registry.ProfileRunnable(body.ServerID); !runnable {
 			writeError(w, 400, reason, "server_id")
 			return
 		}
-		item, err := s.registry.Create(body.Label, body.ServerID, body.Workspace)
+		item, err := s.registry.Create(body.Label, body.AgentID, body.ServerID, body.Workspace)
 		if err != nil {
 			writeError(w, 400, err.Error(), "session")
 			return
@@ -647,13 +661,27 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Label    *string `json:"label"`
 			ServerID *string `json:"server_id"`
+			AgentID  *string `json:"agent_id"`
 		}
 		if !decode(w, r, &body) {
 			return
 		}
-		if body.Label == nil && body.ServerID == nil {
-			writeError(w, 400, "label or server_id is required", "session")
+		if body.Label == nil && body.ServerID == nil && body.AgentID == nil {
+			writeError(w, 400, "label, server_id, or agent_id is required", "session")
 			return
+		}
+		if body.AgentID != nil {
+			if err := s.registry.SetAgent(id, *body.AgentID); err != nil {
+				status := http.StatusBadRequest
+				field := "agent_id"
+				if strings.Contains(err.Error(), "not found") {
+					status = http.StatusNotFound
+				} else if strings.Contains(err.Error(), "running") {
+					status, field = http.StatusConflict, "session"
+				}
+				writeError(w, status, err.Error(), field)
+				return
+			}
 		}
 		if body.ServerID != nil {
 			if err := s.registry.SetServer(id, *body.ServerID); err != nil {
@@ -679,7 +707,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 404, "session not found", "session")
 			return
 		}
-		if body.ServerID != nil && s.runner != nil {
+		if (body.ServerID != nil || body.AgentID != nil) && s.runner != nil {
 			s.runner.PublishBudget(r.Context(), item)
 		}
 		writeJSON(w, 200, map[string]any{"session": item.Snapshot()})
@@ -707,6 +735,53 @@ func (s *Server) servers(w http.ResponseWriter, r *http.Request) {
 	masked := s.cfg.Masked()
 	s.mu.RUnlock()
 	writeJSON(w, 200, masked.Servers)
+}
+func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.mu.RLock()
+		agents := append([]config.Agent(nil), s.cfg.Agents...)
+		s.mu.RUnlock()
+		writeJSON(w, 200, agents)
+	case http.MethodDelete:
+		var body struct {
+			ID string `json:"id"`
+		}
+		if !decode(w, r, &body) {
+			return
+		}
+		if sessionID, used := s.registry.AgentInUse(body.ID); used {
+			writeError(w, 409, "agent in use by session "+sessionID, "agent_id")
+			return
+		}
+		s.mu.Lock()
+		found := false
+		kept := s.cfg.Agents[:0]
+		for _, item := range s.cfg.Agents {
+			if item.ID == body.ID {
+				found = true
+				continue
+			}
+			kept = append(kept, item)
+		}
+		s.cfg.Agents = kept
+		if !found {
+			s.mu.Unlock()
+			writeError(w, 404, "agent not found", "agent_id")
+			return
+		}
+		err := s.cfg.Save(s.configPath)
+		masked := s.cfg.Masked()
+		s.mu.Unlock()
+		if err != nil {
+			writeError(w, 500, err.Error(), "config")
+			return
+		}
+		s.bus.Publish(events.New(events.ConfigChanged, "", "", map[string]any{"config": masked}))
+		writeJSON(w, 200, map[string]string{"agent_id": body.ID})
+	default:
+		method(w)
+	}
 }
 func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 	tail := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/servers/"), "/")
@@ -1005,7 +1080,12 @@ func (s *Server) toggleTool(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "session not found", "session_id")
 		return
 	}
-	if !item.ToggleTool(name, body.Enabled) {
+	ok, reason := item.ToggleTool(name, body.Enabled)
+	if !ok {
+		if reason != "" {
+			writeError(w, 403, reason, "name")
+			return
+		}
 		writeError(w, 404, "tool not found", "name")
 		return
 	}
@@ -1015,7 +1095,7 @@ func (s *Server) toggleTool(w http.ResponseWriter, r *http.Request) {
 }
 func mergeConfig(dst, src map[string]any) {
 	for key, value := range src {
-		if key == "servers" {
+		if key == "servers" || key == "agents" {
 			incoming, _ := value.([]any)
 			existing, _ := dst[key].([]any)
 			byID := map[string]map[string]any{}
@@ -1050,6 +1130,12 @@ func mergeConfig(dst, src map[string]any) {
 		}
 		child, childOK := value.(map[string]any)
 		target, targetOK := dst[key].(map[string]any)
+		if key == "tools_enabled" {
+			// The agent tool restriction map is replaced wholesale: merging
+			// would keep stale restrictions the operator just removed.
+			dst[key] = value
+			continue
+		}
 		if childOK && targetOK {
 			mergeConfig(target, child)
 		} else {

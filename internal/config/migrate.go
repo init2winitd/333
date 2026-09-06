@@ -180,6 +180,79 @@ func migrateOperatorIdleTimeout(data []byte, version int) (bool, bool, []byte, e
 	return true, remapped, out, err
 }
 
+// migrateAgents adds the default agent roster to configs created before the
+// roster existed (schema < 6). Existing rosters are left untouched.
+func migrateAgents(data []byte, version int) (bool, []byte, error) {
+	if version >= 6 {
+		return false, data, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false, nil, err
+	}
+	if value := raw["agents"]; value != nil {
+		var agents []Agent
+		if err := json.Unmarshal(value, &agents); err != nil {
+			return false, nil, fmt.Errorf("migrate agents: %w", err)
+		}
+		if len(agents) > 0 {
+			raw["config_version"], _ = json.Marshal(CurrentConfigVersion)
+			out, err := json.Marshal(raw)
+			return true, out, err
+		}
+	}
+	raw["agents"], _ = json.Marshal(defaultAgents())
+	raw["config_version"], _ = json.Marshal(CurrentConfigVersion)
+	out, err := json.Marshal(raw)
+	return true, out, err
+}
+
+// migrateAgentToolSurface extends schema-6 rosters at schema 7: any agent
+// already restricted from write_file also loses run_script and call_service
+// unless the operator explicitly enabled them, so restricted agents cannot
+// reach the shell-equivalent or service tools added upstream.
+func migrateAgentToolSurface(data []byte, version int) (bool, []byte, error) {
+	if version >= 7 {
+		return false, data, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false, nil, err
+	}
+	value := raw["agents"]
+	if value == nil {
+		return false, data, nil
+	}
+	var agents []Agent
+	if err := json.Unmarshal(value, &agents); err != nil {
+		return false, nil, fmt.Errorf("migrate agents: %w", err)
+	}
+	changed := false
+	for i := range agents {
+		if agents[i].ToolsEnabled == nil {
+			continue
+		}
+		if agents[i].ToolsEnabled["write_file"] {
+			continue
+		}
+		for _, name := range []string{"run_script", "call_service"} {
+			if _, set := agents[i].ToolsEnabled[name]; !set {
+				agents[i].ToolsEnabled[name] = false
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		raw["config_version"], _ = json.Marshal(CurrentConfigVersion)
+		out, err := json.Marshal(raw)
+		return true, out, err
+	}
+	raw["agents"], _ = json.Marshal(agents)
+	raw["config_version"], _ = json.Marshal(CurrentConfigVersion)
+	out, err := json.Marshal(raw)
+	return true, out, err
+}
+
 func migrateV1(data []byte) (bool, []byte, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {

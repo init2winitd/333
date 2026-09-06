@@ -34,7 +34,7 @@ func TestSessionServerReassignment(t *testing.T) {
 	server := New(&cfg, filepath.Join(root, "harness.json"), root, RuntimeRoots{Application: root, Data: root, Workspace: cfg.Workspace}, bus)
 	registry := session.NewRegistry(bus, writers, server.Profile, cfg.Run.MaxTurns, server.ConfigSnapshot)
 	server.SetRegistry(registry)
-	item, err := registry.Create("main", "first", root)
+	item, err := registry.Create("main", "", "first", root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestDropLastMessageEndpoint(t *testing.T) {
 	server := New(&cfg, filepath.Join(root, "harness.json"), root, RuntimeRoots{Application: root, Data: root, Workspace: root}, bus)
 	registry := session.NewRegistry(bus, writers, server.Profile, cfg.Run.MaxTurns, server.ConfigSnapshot)
 	server.SetRegistry(registry)
-	item, err := registry.Create("main", "main", root)
+	item, err := registry.Create("main", "", "main", root)
 	if err != nil {
 		t.Fatal(err)
 	}

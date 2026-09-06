@@ -33,6 +33,7 @@ let hardeningServerID = "";
 
 const sectionLabels = [
   ["servers", "Connections"],
+  ["agents", "Agents"],
   ["sessions", "Sessions"],
   ["tools", "Tools"],
   ["memory", "Memory"],
@@ -139,6 +140,7 @@ function render() {
   );
   const content = {
     servers: () => servers(),
+    agents: () => agents(),
     sessions: () => sessions(),
     tools: () => tools(active),
     memory: () => memory(active),
@@ -283,8 +285,47 @@ function profileFields(profile, reason) {
     </div>`;
 }
 
+const TOOL_NAMES = ["read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "run_script", "call_service"];
+
+function agentList() {
+  return store.config.agents || [];
+}
+
+function agents() {
+  const items = agentList()
+    .map((agent) => {
+      const key = `agent:${agent.id}`;
+      const profileOptions = [`<option value="" ${!agent.server_id ? "selected" : ""}>inherit main</option>`]
+        .concat(store.servers.map((p) => `<option value="${attr(p.id)}" ${agent.server_id === p.id ? "selected" : ""}>${html(p.label)}</option>`))
+        .join("");
+      const toolChecks = TOOL_NAMES.map((name) => {
+        const allowed = agent.tools_enabled ? agent.tools_enabled[name] !== false : true;
+        return `<label class="agent-tool-check"><input type="checkbox" data-agent-tool="${attr(agent.id)}" data-tool="${name}" ${allowed ? "checked" : ""}>${name}</label>`;
+      }).join("");
+      return `<div class="agent-card">
+        <div class="agent-card-head">
+          <input class="agent-label" data-agent-label="${attr(agent.id)}" value="${attr(agent.label)}" aria-label="${attr(agent.id)} label">
+          <select data-agent-server="${attr(agent.id)}" aria-label="${attr(agent.id)} model profile">${profileOptions}</select>
+          <button type="button" class="${armed.has(key) ? "confirm" : ""}" data-action="remove-agent" data-id="${attr(agent.id)}">${armed.has(key) ? "Confirm" : "Remove"}</button>
+        </div>
+        <div class="agent-persona-row"><textarea class="agent-persona" data-agent-persona="${attr(agent.id)}" rows="3" aria-label="${attr(agent.id)} persona">${html(agent.persona || "")}</textarea></div>
+        <div class="agent-tools-grid">${toolChecks}</div>
+        ${issue(`agents.${agent.id}`) ? `<p class="field-error">${html(issue(`agents.${agent.id}`))}</p>` : ""}
+      </div>`;
+    })
+    .join("");
+  return `${items}
+    <div class="settings-subhead">New agent</div>
+    ${row("id", '<input id="new-agent-id" value="new-agent">')}
+    ${row("label", '<input id="new-agent-label" value="New agent">')}
+    <button type="button" class="text-action" data-action="add-agent">Add agent</button>
+    ${issue("new-agent") ? `<p class="field-error">${html(issue("new-agent"))}</p>` : ""}
+    <p class="settings-note">Agent personas and tool restrictions are saved as you change them. A restricted tool cannot be re-enabled for a session bound to the agent. Sessions pick an agent in Console or Chat.</p>`;
+}
+
 function sessions() {
   const profiles = store.servers.filter((profile) => !profileReason(profile));
+  const agentOptions = `<option value="">no agent</option>` + agentList().map((a) => `<option value="${attr(a.id)}">${html(a.label)}</option>`).join("");
   const items = Object.values(store.sessions)
     .map((item) => {
       const running = item.run.status !== "idle";
@@ -295,8 +336,12 @@ function sessions() {
           return `<option value="${attr(candidate.id)}" ${candidate.id === item.server_id ? "selected" : ""} ${problem ? "disabled" : ""}>${html(candidate.label)}</option>`;
         })
         .join("");
+      const sessionAgentOptions = `<option value="">no agent</option>` + agentList()
+        .map((a) => `<option value="${attr(a.id)}" ${a.id === item.agent_id ? "selected" : ""}>${html(a.label)}</option>`)
+        .join("");
       return `<div class="session-row">
         <input class="session-label" data-session-label="${attr(item.id)}" value="${attr(item.label)}" aria-label="${attr(item.id)} label">
+        <select data-session-agent="${attr(item.id)}" aria-label="${attr(item.id)} agent" ${running || store.replay ? "disabled" : ""}>${sessionAgentOptions}</select>
         <select data-session-server="${attr(item.id)}" aria-label="${attr(item.id)} server" ${running || store.replay ? "disabled" : ""}>${profileOptions}</select><span class="path" title="${attr(item.workspace)}">${html(item.workspace)}</span>
         <span>${html(item.run.status)}</span>
         <button type="button" class="${armed.has(key) ? "confirm" : ""}" data-action="close-session" data-id="${attr(item.id)}">${running && armed.has(key) ? "Confirm" : "Close"}</button>
@@ -309,6 +354,7 @@ function sessions() {
   return `${items}
     <div class="settings-subhead">New session</div>
     ${row("label", '<input id="new-session-label" value="new session">')}
+    ${row("agent", `<select id="new-session-agent">${agentOptions}</select>`)}
     ${row("profile", `<select id="new-session-profile">${options}</select>`)}
     ${row("workspace", `<input id="new-session-workspace" value="${attr(store.config.workspace || "")}">`)}
     <button type="button" class="text-action" data-action="new-session" ${options ? "" : "disabled"}>New session</button>
@@ -666,6 +712,8 @@ async function click(event) {
   if (action === "add-server") return addServer();
   if (action === "duplicate-server") return duplicateServer(id);
   if (action === "remove-server") return removeServer(id);
+  if (action === "add-agent") return addAgent();
+  if (action === "remove-agent") return removeAgent(id);
   if (action === "new-session") return newSession();
   if (action === "close-session") return closeSession(id);
   if (action === "reset-session") return resetSession(id);
@@ -963,6 +1011,57 @@ async function blur(event) {
       render();
     }
   }
+  if (input.matches("[data-agent-label]")) {
+    return saveAgentPatch(input.dataset.agentLabel, { label: input.value }, `agents.${input.dataset.agentLabel}`);
+  }
+  if (input.matches("[data-agent-persona]")) {
+    return saveAgentPatch(input.dataset.agentPersona, { persona: input.value }, `agents.${input.dataset.agentPersona}`);
+  }
+}
+
+async function saveAgentPatch(id, patchBody, errorKey) {
+  try {
+    const result = await api("/api/config", { agents: [{ id, ...patchBody }] });
+    errors.delete(errorKey);
+    reduce({ type: "config.changed", data: { config: result } });
+  } catch (error) {
+    errors.set(errorKey, error.message);
+    render();
+  }
+}
+
+async function addAgent() {
+  const id = slugifyAgent(sheet.querySelector("#new-agent-id").value || "new-agent");
+  const label = sheet.querySelector("#new-agent-label").value || id;
+  try {
+    const result = await api("/api/config", { agents: [{ id, label, persona: "" }] });
+    errors.delete("new-agent");
+    reduce({ type: "config.changed", data: { config: result } });
+  } catch (error) {
+    errors.set("new-agent", error.message);
+    render();
+  }
+}
+
+function slugifyAgent(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "agent";
+}
+
+async function removeAgent(id) {
+  const key = `agent:${id}`;
+  if (!armed.has(key)) {
+    armed.add(key);
+    return render();
+  }
+  try {
+    await api("/api/agents", { id }, "DELETE");
+    armed.delete(key);
+    reduce({ type: "config.changed", data: { config: await api("/api/config", undefined, "GET") } });
+  } catch (error) {
+    errors.set(`agents.${id}`, error.message);
+    armed.delete(key);
+    render();
+  }
 }
 
 async function change(event) {
@@ -973,6 +1072,33 @@ async function change(event) {
     render();
     await refreshHardeningStatus();
     return;
+  }
+  if (event.target.matches("[data-session-agent]")) {
+    const select = event.target;
+    const id = select.dataset.sessionAgent;
+    try {
+      await api(`/api/sessions/${encodeURIComponent(id)}`, { agent_id: select.value });
+      errors.delete(`session.${id}`);
+      reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
+      setActive(id);
+    } catch (error) {
+      errors.set(`session.${id}`, error.message);
+      render();
+    }
+    return;
+  }
+  if (event.target.matches("[data-agent-server]")) {
+    const select = event.target;
+    return saveAgentPatch(select.dataset.agentServer, { server_id: select.value }, `agents.${select.dataset.agentServer}`);
+  }
+  if (event.target.matches("[data-agent-tool]")) {
+    const input = event.target;
+    const id = input.dataset.agentTool;
+    const agent = agentList().find((a) => a.id === id);
+    const tools = { ...(agent?.tools_enabled || {}) };
+    if (input.checked) delete tools[input.dataset.tool];
+    else tools[input.dataset.tool] = false;
+    return saveAgentPatch(id, { tools_enabled: tools }, `agents.${id}`);
   }
   const select = event.target.closest("[data-session-server]");
   if (!select) return;
@@ -1099,6 +1225,7 @@ async function removeServer(id) {
 async function newSession() {
   const body = {
     label: sheet.querySelector("#new-session-label").value,
+    agent_id: sheet.querySelector("#new-session-agent")?.value || "",
     server_id: sheet.querySelector("#new-session-profile").value,
     workspace: sheet.querySelector("#new-session-workspace").value,
   };

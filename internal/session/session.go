@@ -27,6 +27,7 @@ type Snapshot struct {
 	ID                   string           `json:"id"`
 	Label                string           `json:"label"`
 	ServerID             string           `json:"server_id"`
+	AgentID              string           `json:"agent_id"`
 	Workspace            string           `json:"workspace"`
 	Run                  RunState         `json:"run"`
 	Tools                []ToolState      `json:"tools"`
@@ -46,29 +47,30 @@ type Snapshot struct {
 	CompactionCompletion int              `json:"compaction_completion_tokens"`
 }
 type Session struct {
-	ID, Label, ServerID, Workspace string
-	Messages                       []events.Message
-	Budget                         events.Budget
-	Run                            RunState
-	ToolsEnabled                   map[string]bool
-	ToolCalls                      map[string]int
-	LastSeen                       map[string]time.Time
-	CreatedAt                      time.Time
-	LogPath                        string
-	Runnable                       bool
-	NotRunnableReason              string
-	MemoryBlock                    string
-	MemoryPath                     string
-	SchemaTokens                   map[string]int
-	MarginalTokens                 map[string]int
-	queuedMessages                 int
-	modelTurns                     int
-	compactionCount                int
-	compactionTokenDelta           int
-	compactionModelCalls           int
-	compactionPrompt               int
-	compactionCompletion           int
-	mu                             sync.Mutex
+	ID, Label, ServerID, AgentID, Workspace string
+	Messages                                []events.Message
+	Budget                                  events.Budget
+	Run                                     RunState
+	ToolsEnabled                            map[string]bool
+	ToolCalls                               map[string]int
+	LastSeen                                map[string]time.Time
+	CreatedAt                               time.Time
+	LogPath                                 string
+	Runnable                                bool
+	NotRunnableReason                       string
+	MemoryBlock                             string
+	MemoryPath                              string
+	SchemaTokens                            map[string]int
+	MarginalTokens                          map[string]int
+	ToolCeiling                             map[string]bool
+	queuedMessages                          int
+	modelTurns                              int
+	compactionCount                         int
+	compactionTokenDelta                    int
+	compactionModelCalls                    int
+	compactionPrompt                        int
+	compactionCompletion                    int
+	mu                                      sync.Mutex
 }
 
 func (s *Session) Snapshot() Snapshot {
@@ -78,10 +80,13 @@ func (s *Session) Snapshot() Snapshot {
 	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "run_script", "call_service"} {
 		enabled, ok := s.ToolsEnabled[name]
 		if ok {
+			if !s.ceilingAllows(name) {
+				enabled = false
+			}
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name], MarginalTokens: s.MarginalTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, AgentID: s.AgentID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
@@ -98,16 +103,49 @@ func (s *Session) LastSeenAt(path string) (time.Time, bool) {
 func (s *Session) ToolEnabled(name string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.ceilingAllows(name) {
+		return false
+	}
 	return s.ToolsEnabled[name]
 }
-func (s *Session) ToggleTool(name string, enabled bool) bool {
+
+// SetToolCeiling installs the agent policy ceiling: tools denied by the
+// ceiling can never be re-enabled by a session toggle. Nil clears it.
+func (s *Session) SetToolCeiling(ceiling map[string]bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ceiling == nil {
+		s.ToolCeiling = nil
+		return
+	}
+	out := make(map[string]bool, len(ceiling))
+	for k, v := range ceiling {
+		out[k] = v
+	}
+	s.ToolCeiling = out
+}
+
+func (s *Session) ceilingAllows(name string) bool {
+	if s.ToolCeiling == nil {
+		return true
+	}
+	allowed, known := s.ToolCeiling[name]
+	return !known || allowed
+}
+
+// ToggleTool flips a session tool. An agent policy ceiling wins: enabling a
+// ceiling-denied tool reports the violation instead of toggling.
+func (s *Session) ToggleTool(name string, enabled bool) (bool, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.ToolsEnabled[name]; !ok {
-		return false
+		return false, ""
+	}
+	if enabled && !s.ceilingAllows(name) {
+		return false, "agent policy denies " + name + " for this session"
 	}
 	s.ToolsEnabled[name] = enabled
-	return true
+	return true, ""
 }
 func (s *Session) IncrementToolCall(name string) {
 	s.mu.Lock()
@@ -124,6 +162,9 @@ func (s *Session) EnabledTools() map[string]bool {
 	defer s.mu.Unlock()
 	out := map[string]bool{}
 	for k, v := range s.ToolsEnabled {
+		if !s.ceilingAllows(k) {
+			v = false
+		}
 		out[k] = v
 	}
 	return out

@@ -123,6 +123,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	renderer.SetAgents(func(id string) (config.Agent, bool) {
+		return web.ConfigSnapshot().Agent(id)
+	})
 	workspaces := session.NewWorkspaceRegistry()
 	coordinator := tools.NewFileCoordinator(workspaces, registry.Label, bus)
 	credentialStore := credential.New(paths.Data)
@@ -175,7 +178,11 @@ func main() {
 	} else {
 		log.Printf("startup profile %s not runnable: %s; use Connections > Test", mainServerID, reason)
 	}
-	mainSession, err := registry.Create("main", mainServerID, cfg.Workspace)
+	startAgent := ""
+	if _, ok := cfg.Agent("coder"); ok {
+		startAgent = "coder"
+	}
+	mainSession, err := registry.Create("main", startAgent, mainServerID, cfg.Workspace)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -31,12 +31,51 @@ func NewRegistry(bus *events.Bus, writers *events.Writers, profiles func(string)
 func (r *Registry) SetMemoryLoader(loader func(context.Context, string, string) (string, string, error)) {
 	r.memory = loader
 }
-func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
+
+// agentToolSet returns the tool restrictions for an agent ID; unknown agents
+// fall back to the unrestricted set so legacy sessions keep every tool.
+func (r *Registry) agentToolSet(agentID string) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range config.AllToolNames {
+		out[name] = true
+	}
+	if agentID == "" {
+		return out
+	}
+	if item, ok := r.config().Agent(agentID); ok {
+		return item.ToolSet()
+	}
+	return out
+}
+
+// agentCeiling returns the policy ceiling for an agent: a copy of its tool
+// set that session toggles can never exceed. Empty agent means no ceiling.
+func (r *Registry) agentCeiling(agentID string) map[string]bool {
+	if agentID == "" {
+		return nil
+	}
+	if item, ok := r.config().Agent(agentID); ok {
+		return item.ToolSet()
+	}
+	return nil
+}
+
+func (r *Registry) Create(label, agentID, serverID, workspace string) (*Session, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	profile, ok := r.profiles(serverID)
 	if !ok {
 		return nil, fmt.Errorf("server_id: unknown profile %s", serverID)
+	}
+	if agentID != "" {
+		if item, ok := r.config().Agent(agentID); ok {
+			if item.ServerID != "" {
+				if profile, ok = r.profiles(item.ServerID); !ok {
+					return nil, fmt.Errorf("server_id: agent %s binds unknown profile %s", agentID, item.ServerID)
+				}
+				serverID = item.ServerID
+			}
+		}
 	}
 	abs, err := filepath.Abs(workspace)
 	if err != nil {
@@ -58,7 +97,8 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 		return nil, err
 	}
 	runnable, reason := runnable(profile, r.config().Context.Accounting)
-	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "search_text": true, "shell": true, "remember": true, "recall": true, "fetch_url": true, "find_files": true, "run_script": true, "call_service": true}
+	tools := r.agentToolSet(agentID)
+	ceiling := r.agentCeiling(agentID)
 	memoryBlock, memoryPath := "", ""
 	if r.memory != nil {
 		memoryBlock, memoryPath, err = r.memory(context.Background(), abs, serverID)
@@ -66,7 +106,7 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 			return nil, err
 		}
 	}
-	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	session := &Session{ID: id, Label: label, ServerID: serverID, AgentID: agentID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCeiling: ceiling, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
 	session.Messages = []events.Message{}
 	session.Budget = initialBudget(profile)
 	r.sessions[id] = session
@@ -172,6 +212,76 @@ func (r *Registry) SetServer(id, serverID string) error {
 		"memory_content":      memoryBlock,
 	}))
 	return nil
+}
+
+// SetAgent rebinds a session to a persona: tool restrictions are re-applied,
+// and the agent's own model profile binding takes effect when set. An empty
+// agentID clears the binding and restores the unrestricted tool set.
+func (r *Registry) SetAgent(id, agentID string) error {
+	s, ok := r.Get(id)
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+	var item config.Agent
+	hasAgent := false
+	if agentID != "" {
+		item, hasAgent = r.config().Agent(agentID)
+		if !hasAgent {
+			return fmt.Errorf("agent_id: unknown agent %s", agentID)
+		}
+	}
+	s.mu.Lock()
+	if s.Run.Status != "idle" {
+		s.mu.Unlock()
+		return fmt.Errorf("session is running")
+	}
+	s.mu.Unlock()
+
+	if hasAgent && item.ServerID != "" && item.ServerID != s.ServerID {
+		if err := r.SetServer(id, item.ServerID); err != nil {
+			return err
+		}
+	}
+
+	tools := r.agentToolSet(agentID)
+	s.mu.Lock()
+	if s.Run.Status != "idle" {
+		s.mu.Unlock()
+		return fmt.Errorf("session is running")
+	}
+	s.AgentID = agentID
+	changed := []string{}
+	for _, name := range config.AllToolNames {
+		if s.ToolsEnabled[name] != tools[name] {
+			changed = append(changed, name)
+		}
+	}
+	s.ToolsEnabled = tools
+	s.mu.Unlock()
+	s.SetToolCeiling(r.agentCeiling(agentID))
+
+	r.bus.Publish(events.New(events.SessionUpdated, id, "", map[string]any{
+		"session_id": id,
+		"agent_id":   agentID,
+	}))
+	for _, name := range changed {
+		r.bus.Publish(events.New(events.ToolToggled, id, "", map[string]any{
+			"session_id": id,
+			"name":       name,
+			"enabled":    tools[name],
+		}))
+	}
+	return nil
+}
+
+// AgentInUse reports the first session bound to an agent profile.
+func (r *Registry) AgentInUse(agentID string) (string, bool) {
+	for _, item := range r.List() {
+		if item.AgentID == agentID {
+			return item.ID, true
+		}
+	}
+	return "", false
 }
 func (r *Registry) Reset(id string) (string, error) {
 	s, ok := r.Get(id)

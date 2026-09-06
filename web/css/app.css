@@ -75,6 +75,17 @@
 .tab-label {
   font-weight: 500;
 }
+.tab-agent {
+  font-size: 12px;
+  color: var(--ink);
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab-agent:empty {
+  display: none;
+}
 .tab-server {
   font-size: 12px;
   color: var(--mute);
@@ -1388,7 +1399,7 @@
 .session-row {
   min-height: 36px;
   display: grid;
-  grid-template-columns: 76px 70px minmax(0, 1fr) 48px auto;
+  grid-template-columns: 76px 70px 70px minmax(0, 1fr) 48px auto;
   gap: 6px;
   align-items: center;
   border-bottom: 1px solid rgba(125, 135, 148, 0.28);
@@ -1656,4 +1667,66 @@
 
 @media (max-width: 800px) {
   .rack { grid-template-columns: 1fr; }
+}
+
+.agent-card {
+  background: var(--well);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.6);
+  border-radius: 2px;
+  padding: var(--s3);
+  margin-bottom: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.agent-card-head {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+}
+.agent-card-head input {
+  min-width: 0;
+  width: 120px;
+  font-weight: 500;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(125, 135, 148, 0.28);
+  color: var(--ink);
+}
+.agent-card-head select {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 4px;
+  background: transparent;
+  border: 1px solid rgba(125, 135, 148, 0.28);
+  font: 12px/20px var(--sans);
+  color: var(--ink);
+}
+.agent-persona {
+  width: 100%;
+  resize: vertical;
+  padding: var(--s2);
+  background: transparent;
+  border: 1px solid rgba(125, 135, 148, 0.28);
+  border-radius: 2px;
+  color: var(--ink);
+  font: 12px/20px var(--sans);
+}
+.agent-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px var(--s2);
+}
+.agent-tool-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 12px/20px var(--mono);
+  color: var(--mute);
+  cursor: pointer;
+}
+.agent-tool-check input { accent-color: var(--trace); }
+.agent-tool-check:has(input:checked) { color: var(--ink); }
+@media (max-width: 800px) {
+  .agent-tools-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

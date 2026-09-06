@@ -142,7 +142,7 @@ func TestApprovalModeDefaultsWhenAbsentOrEmpty(t *testing.T) {
 
 func TestServicesAdditiveSchemaFiveDefaultsEmpty(t *testing.T) {
 	cfg := Defaults(t.TempDir())
-	if cfg.ConfigVersion != 5 || cfg.Services == nil || len(cfg.Services) != 0 {
+	if cfg.ConfigVersion != 7 || cfg.Services == nil || len(cfg.Services) != 0 {
 		t.Fatalf("defaults version=%d services=%#v", cfg.ConfigVersion, cfg.Services)
 	}
 	data, err := json.Marshal(cfg)
@@ -163,7 +163,7 @@ func TestServicesAdditiveSchemaFiveDefaultsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	ApplyDefaults(&omitted)
-	if omitted.ConfigVersion != 5 || omitted.Services == nil || len(omitted.Services) != 0 {
+	if omitted.ConfigVersion != 7 || omitted.Services == nil || len(omitted.Services) != 0 {
 		t.Fatalf("omitted services=%#v version=%d", omitted.Services, omitted.ConfigVersion)
 	}
 	if err := omitted.Validate(); err != nil {
@@ -337,7 +337,7 @@ func TestOperatorIdleTimeoutSchemaMigration(t *testing.T) {
 	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || loaded.Shell.OperatorContextIdleTimeoutMinutes != 37 {
 		t.Fatalf("migrated=%t version=%d idle=%d", migrated, loaded.ConfigVersion, loaded.Shell.OperatorContextIdleTimeoutMinutes)
 	}
-	if len(loaded.LoadNotices) != 3 || loaded.LoadNotices[0] != OperatorIdleTimeoutMigrationNotice || loaded.LoadNotices[1] != ByteWindowMigrationNotice || loaded.LoadNotices[2] != ModelRolesMigrationNotice {
+	if len(loaded.LoadNotices) != 5 || loaded.LoadNotices[0] != OperatorIdleTimeoutMigrationNotice || loaded.LoadNotices[1] != ByteWindowMigrationNotice || loaded.LoadNotices[2] != ModelRolesMigrationNotice || loaded.LoadNotices[3] != AgentsMigrationNotice || loaded.LoadNotices[4] != AgentToolSurfaceMigrationNotice {
 		t.Fatalf("migration notices=%#v", loaded.LoadNotices)
 	}
 	persisted, err := os.ReadFile(path)
@@ -414,7 +414,7 @@ func TestVersion3LineLimitsMigrateToByteWindows(t *testing.T) {
 	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || loaded.Tools.ReadFile.DefaultLimit != 16<<10 || loaded.Tools.ReadFile.MaxLimit != 64<<10 || loaded.Tools.Fetch.DefaultLimit != 16<<10 || loaded.Tools.Fetch.MaxLimit != 64<<10 {
 		t.Fatalf("migrated=%t config=%+v", migrated, loaded.Tools)
 	}
-	if len(loaded.LoadNotices) != 2 || loaded.LoadNotices[0] != ByteWindowMigrationNotice || loaded.LoadNotices[1] != ModelRolesMigrationNotice {
+	if len(loaded.LoadNotices) != 4 || loaded.LoadNotices[0] != ByteWindowMigrationNotice || loaded.LoadNotices[1] != ModelRolesMigrationNotice || loaded.LoadNotices[2] != AgentsMigrationNotice || loaded.LoadNotices[3] != AgentToolSurfaceMigrationNotice {
 		t.Fatalf("migration notices=%#v", loaded.LoadNotices)
 	}
 	persisted, err := os.ReadFile(path)
@@ -660,13 +660,13 @@ func TestSchema4ModelProfilesMigrateWithUTF8BOM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !migrated || loaded.ConfigVersion != 5 || loaded.Roles.Main != "homepc" || loaded.Roles.Aux != "" {
+	if !migrated || loaded.ConfigVersion != 7 || loaded.Roles.Main != "homepc" || loaded.Roles.Aux != "" {
 		t.Fatalf("migrated=%t version=%d roles=%+v", migrated, loaded.ConfigVersion, loaded.Roles)
 	}
 	if loaded.Servers[1].Context.NCtx != 16384 || loaded.Servers[1].Capabilities.NCtx != 32768 {
 		t.Fatalf("profile context=%+v capabilities=%+v", loaded.Servers[1].Context, loaded.Servers[1].Capabilities)
 	}
-	if len(loaded.LoadNotices) != 1 || loaded.LoadNotices[0] != ModelRolesMigrationNotice {
+	if len(loaded.LoadNotices) != 3 || loaded.LoadNotices[0] != ModelRolesMigrationNotice || loaded.LoadNotices[1] != AgentsMigrationNotice || loaded.LoadNotices[2] != AgentToolSurfaceMigrationNotice {
 		t.Fatalf("notices=%#v", loaded.LoadNotices)
 	}
 	persisted, err := os.ReadFile(path)
@@ -791,7 +791,7 @@ func TestSchema4APIKeyMovesToNamedDPAPIStore(t *testing.T) {
 
 func TestAttachmentConfigIsAdditiveSchemaFive(t *testing.T) {
 	cfg := Defaults(t.TempDir())
-	if cfg.ConfigVersion != 5 || cfg.Tools.Attachments.MaxBytes != 8<<20 {
+	if cfg.ConfigVersion != 7 || cfg.Tools.Attachments.MaxBytes != 8<<20 {
 		t.Fatalf("defaults: version=%d attachments=%+v", cfg.ConfigVersion, cfg.Tools.Attachments)
 	}
 	data, err := os.ReadFile(filepath.Join("..", "..", "harness.example.json"))
@@ -810,11 +810,58 @@ func TestAttachmentConfigIsAdditiveSchemaFive(t *testing.T) {
 		t.Fatal(err)
 	}
 	ApplyDefaults(&loaded)
-	if loaded.ConfigVersion != 5 || loaded.Tools.Attachments.MaxBytes != 8<<20 {
+	if loaded.ConfigVersion != 7 || loaded.Tools.Attachments.MaxBytes != 8<<20 {
 		t.Fatalf("omitted attachment defaults=%+v version=%d", loaded.Tools.Attachments, loaded.ConfigVersion)
 	}
 	loaded.Tools.Attachments.MaxBytes = 0
 	if err := loaded.Validate(); err == nil || !strings.Contains(err.Error(), "tools.attachments.max_bytes") {
 		t.Fatalf("zero limit validation=%v", err)
+	}
+}
+
+func TestSchema6AgentToolSurfaceMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	// Schema 6 roster from before run_script/call_service existed: tester and
+	// scout are restricted from write_file but say nothing about the new tools.
+	six := `{"config_version":6,"listen":"127.0.0.1:8790","workspace":".","servers":[{"id":"local","label":"Local","base_url":"http://127.0.0.1:1","model":"m"}],"roles":{"main":"local"},"agents":[{"id":"coder","label":"Coder","persona":"p"},{"id":"tester","label":"Tester","persona":"p","tools_enabled":{"write_file":false}},{"id":"scout","label":"Scout","persona":"p","tools_enabled":{"write_file":false,"run_script":true}}]}`
+	if err := os.WriteFile(path, []byte(six), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, migrated, _, err := LoadWithRoots(path, "", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !migrated || loaded.ConfigVersion != CurrentConfigVersion {
+		t.Fatalf("migrated=%t version=%d", migrated, loaded.ConfigVersion)
+	}
+	tester, ok := loaded.Agent("tester")
+	if !ok {
+		t.Fatal("tester missing")
+	}
+	if tester.ToolAllowed("run_script") || tester.ToolAllowed("call_service") {
+		t.Fatalf("tester kept shell-equivalent tools: %#v", tester.ToolsEnabled)
+	}
+	if !tester.ToolAllowed("read_file") {
+		t.Fatal("tester lost an unrestricted tool")
+	}
+	scout, _ := loaded.Agent("scout")
+	if !scout.ToolAllowed("run_script") {
+		t.Fatal("explicit operator enable was overridden by migration")
+	}
+	if scout.ToolAllowed("call_service") {
+		t.Fatal("call_service not denied for scout")
+	}
+	coder, _ := loaded.Agent("coder")
+	if !coder.ToolAllowed("run_script") || !coder.ToolAllowed("call_service") {
+		t.Fatal("unrestricted coder lost tools")
+	}
+	found := false
+	for _, notice := range loaded.LoadNotices {
+		if notice == AgentToolSurfaceMigrationNotice {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing tool surface notice: %#v", loaded.LoadNotices)
 	}
 }

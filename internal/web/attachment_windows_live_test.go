@@ -112,7 +112,7 @@ func TestAttachmentIngestLiveServiceSplit(t *testing.T) {
 	runner := agent.NewRunner(bus, toolRegistry, renderer, server.Profile, server.ConfigSnapshot)
 	scheduler := agent.NewScheduler(runner, registry, bus, server.ConfigSnapshot)
 	server.SetRuntime(scheduler, runner, renderer)
-	item, err := registry.Create("main", "live", workspace)
+	item, err := registry.Create("main", "", "live", workspace)
 	if err != nil {
 		t.Fatal(err)
 	}

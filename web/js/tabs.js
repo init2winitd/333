@@ -6,8 +6,10 @@ const armed = new Set();
 
 export function renderTabs() {
   root.replaceChildren();
+  const agents = store.config.agents || [];
   for (const value of Object.values(store.sessions)) {
     const profile = store.servers.find((item) => item.id === value.server_id);
+    const agent = agents.find((item) => item.id === value.agent_id);
     const tab = document.createElement("div");
     tab.className = `tab ${value.id === store.active ? "active" : ""} ${store.replay ? "replay" : value.run.status} ${fault(value) ? "fault" : ""}`;
     tab.dataset.id = value.id;
@@ -17,9 +19,10 @@ export function renderTabs() {
     const select = document.createElement("button");
     select.type = "button";
     select.className = "tab-select";
-    select.innerHTML = `<span class="lamp"></span><span class="tab-label"></span><span class="tab-server"></span><span class="tab-status mono"></span><span class="tab-budget ${percentClass(ratio * 100)} ${ratio > 0.85 ? "warn" : ""}"></span>`;
+    select.innerHTML = `<span class="lamp"></span><span class="tab-label"></span><span class="tab-agent"></span><span class="tab-server"></span><span class="tab-status mono"></span><span class="tab-budget ${percentClass(ratio * 100)} ${ratio > 0.85 ? "warn" : ""}"></span>`;
     tab.append(select);
     tab.querySelector(".tab-label").textContent = value.label;
+    tab.querySelector(".tab-agent").textContent = agent ? agent.label : "";
     tab.querySelector(".tab-server").textContent = profile?.label || value.server_id;
     tab.querySelector(".tab-status").textContent = tabStatus(value);
     select.onclick = () => setActive(value.id);

@@ -1,5 +1,5 @@
 {
-  "config_version": 5,
+  "config_version": 7,
   "listen": "127.0.0.1:8790",
   "workspace": "./workspace",
   "log_dir": "logs",
@@ -14,11 +14,34 @@
       "request_timeout_s": 900,
       "probe_mode": "full",
       "sampling": {
-        "thinking": { "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0 },
-        "nonthinking": { "temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5, "repeat_penalty": 1.0 }
+        "thinking": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 0.0,
+          "repeat_penalty": 1.0
+        },
+        "nonthinking": {
+          "temperature": 0.7,
+          "top_p": 0.8,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 1.5,
+          "repeat_penalty": 1.0
+        }
       },
-      "reasoning": { "control": "auto", "enabled": true, "effort": "medium", "valid_efforts": [], "preserve": false },
-      "context": { "n_ctx": 0, "reserve_output": 10240 },
+      "reasoning": {
+        "control": "auto",
+        "enabled": true,
+        "effort": "medium",
+        "valid_efforts": [],
+        "preserve": false
+      },
+      "context": {
+        "n_ctx": 0,
+        "reserve_output": 10240
+      },
       "system_prompt_override": "",
       "capabilities": {
         "server": "",
@@ -44,18 +67,125 @@
     }
   ],
   "services": {},
-  "roles": { "main": "local", "aux": "" },
-  "run": { "max_turns": 40, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },
-  "approval": { "mode": "boundary-only" },
-  "deliver": { "mode": "both", "exchange_folder": "%USERPROFILE%\\Agent_b" },
-  "context": { "soft_pct": 0.75, "summary_pct": 0.85, "accounting": "auto" },
-  "memory": { "enabled": true, "dir": "memory", "max_tokens": 1500 },
+  "roles": {
+    "main": "local",
+    "aux": ""
+  },
+  "agents": [
+    {
+      "id": "coder",
+      "label": "Coder",
+      "server_id": "",
+      "persona": "You are the coder. You implement features and fix bugs: inspect the relevant code first, make small exact edits, build or test when a way exists, and report what changed.",
+      "tools_enabled": {}
+    },
+    {
+      "id": "tester",
+      "label": "Tester",
+      "server_id": "",
+      "persona": "You are the tester. You verify behavior, not implement it: run the test suite or the program, reproduce reported problems, and report pass/fail evidence. You cannot edit files; describe the exact fix needed instead.",
+      "tools_enabled": {
+        "write_file": false,
+        "edit_file": false,
+        "run_script": false,
+        "call_service": false
+      }
+    },
+    {
+      "id": "researcher",
+      "label": "Researcher",
+      "server_id": "",
+      "persona": "You are the researcher. You gather and synthesize information: read files, search the workspace, and fetch public sources. You report findings with sources and do not modify anything.",
+      "tools_enabled": {
+        "write_file": false,
+        "edit_file": false,
+        "shell": false,
+        "run_script": false,
+        "call_service": false
+      }
+    },
+    {
+      "id": "scout",
+      "label": "Scout",
+      "server_id": "",
+      "persona": "You are the scout. You explore unfamiliar code and systems quickly: map structure, locate the relevant pieces, and note what you find with remember. You do not modify anything.",
+      "tools_enabled": {
+        "write_file": false,
+        "edit_file": false,
+        "shell": false,
+        "run_script": false,
+        "call_service": false,
+        "fetch_url": false
+      }
+    },
+    {
+      "id": "reviewer",
+      "label": "Reviewer",
+      "server_id": "",
+      "persona": "You are the reviewer. You judge existing work: read the changes, check them against requirements and conventions, and report concrete issues by file and line. You do not modify anything.",
+      "tools_enabled": {
+        "write_file": false,
+        "edit_file": false,
+        "shell": false,
+        "run_script": false,
+        "call_service": false
+      }
+    }
+  ],
+  "run": {
+    "max_turns": 40,
+    "cycle_window": 8,
+    "max_consecutive_tool_errors": 3,
+    "max_concurrent": 2,
+    "queue_depth": 0
+  },
+  "approval": {
+    "mode": "boundary-only"
+  },
+  "deliver": {
+    "mode": "both",
+    "exchange_folder": "%USERPROFILE%\\Agent_b"
+  },
+  "context": {
+    "soft_pct": 0.75,
+    "summary_pct": 0.85,
+    "accounting": "auto"
+  },
+  "memory": {
+    "enabled": true,
+    "dir": "memory",
+    "max_tokens": 1500
+  },
   "tools": {
-    "read_file": { "default_limit": 16384, "max_limit": 65536 },
-    "attachments": { "max_bytes": 8388608 },
-    "list_dir": { "max_entries": 300, "ignore": [".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"] },
-    "grep": { "max_matches": 50, "max_line_chars": 200 },
-    "shell": { "operator_commands": ["git"] },
+    "read_file": {
+      "default_limit": 16384,
+      "max_limit": 65536
+    },
+    "attachments": {
+      "max_bytes": 8388608
+    },
+    "list_dir": {
+      "max_entries": 300,
+      "ignore": [
+        ".git",
+        "node_modules",
+        "__pycache__",
+        "vendor",
+        "bin",
+        "obj",
+        "dist",
+        ".venv"
+      ]
+    },
+    "grep": {
+      "max_matches": 50,
+      "max_line_chars": 200
+    },
+    "shell": {
+      "operator_commands": [
+        "git"
+      ]
+    },
     "fetch": {
       "timeout_s": 20,
       "max_bytes": 2097152,
@@ -63,15 +193,35 @@
       "default_limit": 16384,
       "max_limit": 65536,
       "allow_domains": [],
-      "deny_domains": ["ipinfo.io", "ipapi.co", "ip-api.com", "ifconfig.me", "ipify.org", "geojs.io", "ipgeolocation.io", "icanhazip.com"],
+      "deny_domains": [
+        "ipinfo.io",
+        "ipapi.co",
+        "ip-api.com",
+        "ifconfig.me",
+        "ipify.org",
+        "geojs.io",
+        "ipgeolocation.io",
+        "icanhazip.com"
+      ],
       "allow_internal_hosts": []
     },
     "find_files": {
-      "skip_roots": ["Windows", "$Recycle.Bin", "System Volume Information", "ProgramData\\Microsoft\\Windows Defender*", "Program Files\\Windows Defender*"]
+      "skip_roots": [
+        "Windows",
+        "$Recycle.Bin",
+        "System Volume Information",
+        "ProgramData\\Microsoft\\Windows Defender*",
+        "Program Files\\Windows Defender*"
+      ]
     }
   },
   "shell": {
-    "command": ["powershell", "-NoProfile", "-NonInteractive", "-Command"],
+    "command": [
+      "powershell",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command"
+    ],
     "timeout_s": 60,
     "max_timeout_s": 600,
     "max_output_lines_head": 60,
@@ -79,8 +229,18 @@
     "file_routing_guard": true,
     "operator_context": false,
     "operator_context_idle_timeout_minutes": 20,
-    "service_account": { "enabled": false, "account": "agentb-svc", "domain": "." },
-    "deny": ["rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"]
+    "service_account": {
+      "enabled": false,
+      "account": "agentb-svc",
+      "domain": "."
+    },
+    "deny": [
+      "rm -rf /",
+      "format ",
+      "diskpart",
+      "shutdown",
+      "Remove-Item -Recurse -Force C:\\"
+    ]
   },
   "signing": {
     "thumbprint": "",

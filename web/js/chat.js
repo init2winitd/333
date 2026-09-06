@@ -1,4 +1,4 @@
-import { api, store, subscribe } from "./bus.js";
+import { api, reduce, store, subscribe } from "./bus.js";
 import { renderMarkdown } from "./markdown.js";
 import { operatorLogEntry } from "./operator-log.js";
 import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
@@ -151,6 +151,8 @@ function renderBinding(session) {
   binding.replaceChildren();
   if (requested) {
     binding.textContent = session?.label || requested;
+    newSessionButton.hidden = !!store.replay;
+    binding.append(newSessionButton);
     return;
   }
   const select = document.createElement("select");
@@ -169,6 +171,108 @@ function renderBinding(session) {
     render();
   };
   binding.append(select);
+  const agentSelect = document.createElement("select");
+  agentSelect.setAttribute("aria-label", "Agent");
+  agentSelect.className = "chat-agent-select";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "no agent";
+  none.selected = !(session?.agent_id);
+  agentSelect.append(none);
+  for (const agent of store.config.agents || []) {
+    const option = document.createElement("option");
+    option.value = agent.id;
+    option.textContent = agent.label;
+    option.selected = session?.agent_id === agent.id;
+    agentSelect.append(option);
+  }
+  if (session?.run?.status !== "idle" || store.replay) agentSelect.disabled = true;
+  agentSelect.onchange = async () => {
+    try {
+      await api(`/api/sessions/${encodeURIComponent(bound)}`, { agent_id: agentSelect.value });
+      reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
+    } catch (error) {
+      localNotice = error.message;
+      localAlarm = true;
+      render();
+    }
+  };
+  binding.append(agentSelect);
+  newSessionButton.hidden = !!store.replay;
+  binding.append(newSessionButton);
+  renderNewSessionPanel();
+}
+
+const newSessionButton = document.createElement("button");
+newSessionButton.type = "button";
+newSessionButton.className = "chat-new-session";
+newSessionButton.textContent = "+";
+newSessionButton.setAttribute("aria-label", "New session");
+newSessionButton.title = "New session";
+newSessionButton.onclick = () => toggleNewSessionPanel();
+
+const newSessionRow = document.getElementById("chat-new-session");
+const newSessionLabel = newSessionRow.querySelector(".chat-new-session-label");
+const newSessionAgent = newSessionRow.querySelector(".chat-new-session-agent");
+newSessionRow.querySelector(".chat-new-session-create").onclick = () => createNewSession();
+newSessionRow.querySelector(".chat-new-session-cancel").onclick = () => toggleNewSessionPanel(false);
+newSessionRow.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") createNewSession();
+  if (event.key === "Escape") toggleNewSessionPanel(false);
+});
+let newSessionAgentsSignature = "";
+
+function toggleNewSessionPanel(open) {
+  const next = open ?? newSessionRow.hidden;
+  newSessionRow.hidden = !next || !!store.replay;
+  if (next) {
+    renderNewSessionPanel();
+    newSessionLabel.focus();
+    newSessionLabel.select();
+  }
+}
+
+function renderNewSessionPanel() {
+  const agents = store.config.agents || [];
+  const signature = JSON.stringify(agents.map((a) => a.id));
+  if (signature === newSessionAgentsSignature) return;
+  newSessionAgentsSignature = signature;
+  const current = newSessionAgent.value;
+  newSessionAgent.replaceChildren();
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "no agent";
+  newSessionAgent.append(none);
+  for (const agent of agents) {
+    const option = document.createElement("option");
+    option.value = agent.id;
+    option.textContent = agent.label;
+    newSessionAgent.append(option);
+  }
+  if ([...newSessionAgent.options].some((o) => o.value === current)) newSessionAgent.value = current;
+}
+
+async function createNewSession() {
+  const body = {
+    label: newSessionLabel.value.trim() || "new session",
+    agent_id: newSessionAgent.value,
+  };
+  try {
+    const result = await api("/api/sessions", body);
+    toggleNewSessionPanel(false);
+    if (result.session) {
+      reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
+      changeBound(result.session.id);
+      history.replaceState(null, "", `/chat?session=${encodeURIComponent(result.session.id)}`);
+      follow = true;
+      page = 0;
+    }
+    render();
+  } catch (error) {
+    localNotice = error.message;
+    localAlarm = true;
+    render();
+  }
 }
 
 function renderHeader(session) {

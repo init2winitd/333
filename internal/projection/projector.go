@@ -105,6 +105,7 @@ type Snapshot struct {
 	ID                   string           `json:"id"`
 	Label                string           `json:"label"`
 	ServerID             string           `json:"server_id"`
+	AgentID              string           `json:"agent_id"`
 	Workspace            string           `json:"workspace"`
 	Run                  Run              `json:"run"`
 	Tools                []Tool           `json:"tools"`
@@ -185,11 +186,26 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 	case events.SessionRenamed:
 		next.Label = stringValue(data["label"])
 	case events.SessionUpdated:
-		next.ServerID = stringValue(data["server_id"])
-		next.Runnable = boolValue(data["runnable"])
-		next.NotRunnableReason = stringValue(data["not_runnable_reason"])
-		next.MemoryPath = stringValue(data["memory_path"])
-		next.MemoryContent = stringValue(data["memory_content"])
+		// Fields are merged individually: SetAgent publishes only agent_id,
+		// and SetServer publishes only the server/memory fields.
+		if value, ok := data["server_id"]; ok {
+			next.ServerID = stringValue(value)
+		}
+		if value, ok := data["agent_id"]; ok {
+			next.AgentID = stringValue(value)
+		}
+		if value, ok := data["runnable"]; ok {
+			next.Runnable = boolValue(value)
+		}
+		if value, ok := data["not_runnable_reason"]; ok {
+			next.NotRunnableReason = stringValue(value)
+		}
+		if value, ok := data["memory_path"]; ok {
+			next.MemoryPath = stringValue(value)
+		}
+		if value, ok := data["memory_content"]; ok {
+			next.MemoryContent = stringValue(value)
+		}
 	case events.SessionReset:
 		next.Messages = []events.Message{}
 		next.Tools = cloneTools(next.Tools)
@@ -540,6 +556,7 @@ type seed struct {
 	ID                   string           `json:"id"`
 	Label                string           `json:"label"`
 	ServerID             string           `json:"server_id"`
+	AgentID              string           `json:"agent_id"`
 	Workspace            string           `json:"workspace"`
 	Run                  Run              `json:"run"`
 	Tools                []Tool           `json:"tools"`
@@ -562,7 +579,7 @@ type seed struct {
 func (value seed) snapshot(cursor Cursor) Snapshot {
 	return Snapshot{
 		SchemaVersion: SchemaVersion, Cursor: cursor, Complete: true,
-		ID: value.ID, Label: value.Label, ServerID: value.ServerID, Workspace: value.Workspace,
+		ID: value.ID, Label: value.Label, ServerID: value.ServerID, AgentID: value.AgentID, Workspace: value.Workspace,
 		Run: value.Run, Tools: cloneTools(value.Tools), Messages: cloneMessages(value.Messages), Budget: value.Budget,
 		QueuedMessages: value.QueuedMessages, Runnable: value.Runnable, NotRunnableReason: value.NotRunnableReason,
 		MemoryPath: value.MemoryPath, MemoryContent: value.MemoryContent, LogPath: value.LogPath,
@@ -581,7 +598,7 @@ func diff(before, after Snapshot) Patch {
 		before, now any
 	}{
 		{"complete", before.Complete, after.Complete}, {"id", before.ID, after.ID}, {"label", before.Label, after.Label},
-		{"server_id", before.ServerID, after.ServerID}, {"workspace", before.Workspace, after.Workspace},
+		{"server_id", before.ServerID, after.ServerID}, {"agent_id", before.AgentID, after.AgentID}, {"workspace", before.Workspace, after.Workspace},
 		{"tools", before.Tools, after.Tools}, {"messages", before.Messages, after.Messages}, {"budget", before.Budget, after.Budget},
 		{"queued_messages", before.QueuedMessages, after.QueuedMessages}, {"runnable", before.Runnable, after.Runnable},
 		{"not_runnable_reason", before.NotRunnableReason, after.NotRunnableReason}, {"memory_path", before.MemoryPath, after.MemoryPath},
