@@ -69,14 +69,26 @@ func TestSessionServerReassignment(t *testing.T) {
 
 	item.SetRun(session.RunState{Status: "running"})
 	response = postSessionUpdate(t, server, `{"server_id":"first"}`)
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "session is running") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"queued":true`) {
 		t.Fatalf("running status=%d body=%s", response.Code, response.Body)
 	}
-	if snapshot := item.Snapshot(); snapshot.ServerID != "second" {
-		t.Fatalf("running update changed server to %q", snapshot.ServerID)
+	if snapshot := item.Snapshot(); snapshot.ServerID != "second" || snapshot.PendingServerID != "first" {
+		t.Fatalf("running update: server=%q pending=%q, want second/first", snapshot.ServerID, snapshot.PendingServerID)
+	}
+	// A queued switch to a not-runnable profile is still rejected up front.
+	response = postSessionUpdate(t, server, `{"server_id":"incomplete"}`)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "base_url is empty") {
+		t.Fatalf("queued incomplete status=%d body=%s", response.Code, response.Body)
+	}
+	if snapshot := item.Snapshot(); snapshot.PendingServerID != "first" {
+		t.Fatalf("rejected switch replaced the pending one: %q", snapshot.PendingServerID)
 	}
 
 	item.SetRun(session.RunState{Status: "idle"})
+	registry.ApplyPendingServer(item.ID)
+	if snapshot := item.Snapshot(); snapshot.ServerID != "first" || snapshot.PendingServerID != "" {
+		t.Fatalf("pending switch not applied: server=%q pending=%q", snapshot.ServerID, snapshot.PendingServerID)
+	}
 	response = postSessionUpdate(t, server, `{"server_id":"incomplete"}`)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "base_url is empty") {
 		t.Fatalf("incomplete status=%d body=%s", response.Code, response.Body)

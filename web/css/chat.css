@@ -64,8 +64,21 @@
   font-size: 12px;
   color: var(--ink);
 }
-#chat-binding .chat-agent-select:disabled {
+#chat-binding .chat-model-select {
+  max-width: 150px;
+  font-size: 12px;
+  color: var(--ink);
+}
+#chat-binding .chat-model-select.pending {
+  border-style: dashed;
+}
+#chat-binding .chat-model-select:disabled {
   opacity: 0.55;
+}
+.chat-model-pending {
+  font: 12px/20px var(--mono);
+  color: var(--mute);
+  white-space: nowrap;
 }
 #chat-binding .chat-new-session {
   min-height: 22px;

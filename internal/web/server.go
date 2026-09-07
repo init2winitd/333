@@ -683,18 +683,19 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		queuedSwitch := false
 		if body.ServerID != nil {
-			if err := s.registry.SetServer(id, *body.ServerID); err != nil {
+			queued, err := s.registry.SwitchServer(id, *body.ServerID)
+			if err != nil {
 				status := http.StatusBadRequest
 				field := "server_id"
 				if strings.Contains(err.Error(), "not found") {
 					status, field = http.StatusNotFound, "session"
-				} else if strings.Contains(err.Error(), "running") {
-					status, field = http.StatusConflict, "session"
 				}
 				writeError(w, status, err.Error(), field)
 				return
 			}
+			queuedSwitch = queued
 		}
 		if body.Label != nil {
 			if err := s.registry.Rename(id, *body.Label); err != nil {
@@ -710,7 +711,11 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		if (body.ServerID != nil || body.AgentID != nil) && s.runner != nil {
 			s.runner.PublishBudget(r.Context(), item)
 		}
-		writeJSON(w, 200, map[string]any{"session": item.Snapshot()})
+		response := map[string]any{"session": item.Snapshot()}
+		if queuedSwitch {
+			response["queued"] = true
+		}
+		writeJSON(w, 200, response)
 	case http.MethodDelete:
 		err := s.registry.Close(id, r.URL.Query().Get("force") == "1")
 		if err != nil {

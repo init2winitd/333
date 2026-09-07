@@ -114,6 +114,7 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 		s.queue = append(s.queue, next)
 	}
 	entry.s.SetRun(session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: reason})
+	s.registry.ApplyPendingServer(entry.s.ID)
 	s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": reason, "detail": detail, "turns": turns}))
 	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
 		next := s.queue[0]

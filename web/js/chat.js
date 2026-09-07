@@ -171,6 +171,48 @@ function renderBinding(session) {
     render();
   };
   binding.append(select);
+  const modelSelect = document.createElement("select");
+  modelSelect.setAttribute("aria-label", "Model");
+  modelSelect.className = "chat-model-select";
+  const effectiveServer = session?.pending_server_id || session?.server_id || "";
+  for (const profile of store.servers) {
+    const option = document.createElement("option");
+    option.value = profile.id;
+    option.textContent = profile.label || profile.id;
+    option.selected = profile.id === effectiveServer;
+    modelSelect.append(option);
+  }
+  if (store.replay) modelSelect.disabled = true;
+  if (session?.pending_server_id) {
+    modelSelect.title = `switch queued: applies when the run ends`;
+    modelSelect.classList.add("pending");
+  } else {
+    modelSelect.title = "Model profile (switches queue while a run is active)";
+    modelSelect.classList.remove("pending");
+  }
+  modelSelect.onchange = async () => {
+    try {
+      const result = await api(`/api/sessions/${encodeURIComponent(bound)}`, { server_id: modelSelect.value });
+      reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
+      if (result.queued) {
+        localNotice = "model switch queued — applies when this run ends";
+        localAlarm = false;
+        render();
+      }
+    } catch (error) {
+      localNotice = error.message;
+      localAlarm = true;
+      render();
+    }
+  };
+  binding.append(modelSelect);
+  if (session?.pending_server_id) {
+    const pending = document.createElement("span");
+    pending.className = "chat-model-pending";
+    const target = store.servers.find((profile) => profile.id === session.pending_server_id);
+    pending.textContent = `switch pending → ${target?.label || session.pending_server_id}`;
+    binding.append(pending);
+  }
   const agentSelect = document.createElement("select");
   agentSelect.setAttribute("aria-label", "Agent");
   agentSelect.className = "chat-agent-select";

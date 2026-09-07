@@ -214,6 +214,74 @@ func (r *Registry) SetServer(id, serverID string) error {
 	return nil
 }
 
+// SwitchServer changes a session's model profile. While the session is idle
+// the switch applies immediately; while a run is active the switch is
+// recorded as pending and applied when the run finishes, so flipping models
+// mid-work never fails with "session is running".
+func (r *Registry) SwitchServer(id, serverID string) (bool, error) {
+	s, ok := r.Get(id)
+	if !ok {
+		return false, fmt.Errorf("session not found")
+	}
+	profile, ok := r.profiles(serverID)
+	if !ok {
+		return false, fmt.Errorf("server_id: unknown profile %s", serverID)
+	}
+	if runnable, reason := runnable(profile, r.config().Context.Accounting); !runnable {
+		return false, fmt.Errorf("server_id: %s", reason)
+	}
+	if !s.IsRunning() {
+		return false, r.SetServer(id, serverID)
+	}
+	s.SetPendingServer(serverID)
+	r.bus.Publish(events.New(events.SessionUpdated, id, "", map[string]any{
+		"session_id":        id,
+		"pending_server_id": serverID,
+	}))
+	return true, nil
+}
+
+// ApplyPendingServer applies a queued model switch once the session is idle.
+// It is called by the scheduler after a run finishes. A profile that became
+// not runnable in the meantime is reported as an error event and the pending
+// switch is cleared rather than applied blindly.
+func (r *Registry) ApplyPendingServer(id string) {
+	s, ok := r.Get(id)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	pending := s.PendingServerID
+	s.mu.Unlock()
+	if pending == "" {
+		return
+	}
+	s.SetPendingServer("")
+	if s.IsRunning() {
+		return
+	}
+	if err := r.SetServer(id, pending); err != nil {
+		s.mu.Lock()
+		s.PendingServerID = pending
+		s.mu.Unlock()
+		r.bus.Publish(events.New(events.SessionUpdated, id, "", map[string]any{
+			"session_id":        id,
+			"pending_server_id": pending,
+		}))
+		r.bus.Publish(events.New(events.Error, id, "", map[string]any{
+			"where":   "pending_server_switch",
+			"message": err.Error(),
+		}))
+		return
+	}
+	// SetServer publishes only the server/memory fields; the projection merges
+	// field-wise, so the cleared pending switch needs its own event.
+	r.bus.Publish(events.New(events.SessionUpdated, id, "", map[string]any{
+		"session_id":        id,
+		"pending_server_id": "",
+	}))
+}
+
 // SetAgent rebinds a session to a persona: tool restrictions are re-applied,
 // and the agent's own model profile binding takes effect when set. An empty
 // agentID clears the binding and restores the unrestricted tool set.

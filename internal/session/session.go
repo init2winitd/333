@@ -27,6 +27,7 @@ type Snapshot struct {
 	ID                   string           `json:"id"`
 	Label                string           `json:"label"`
 	ServerID             string           `json:"server_id"`
+	PendingServerID      string           `json:"pending_server_id"`
 	AgentID              string           `json:"agent_id"`
 	Workspace            string           `json:"workspace"`
 	Run                  RunState         `json:"run"`
@@ -48,6 +49,7 @@ type Snapshot struct {
 }
 type Session struct {
 	ID, Label, ServerID, AgentID, Workspace string
+	PendingServerID                         string
 	Messages                                []events.Message
 	Budget                                  events.Budget
 	Run                                     RunState
@@ -86,7 +88,7 @@ func (s *Session) Snapshot() Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name], MarginalTokens: s.MarginalTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, AgentID: s.AgentID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, PendingServerID: s.PendingServerID, AgentID: s.AgentID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
@@ -175,6 +177,11 @@ func (s *Session) Append(message events.Message) {
 	s.mu.Unlock()
 }
 func (s *Session) SetRun(state RunState)          { s.mu.Lock(); s.Run = state; s.mu.Unlock() }
+func (s *Session) SetPendingServer(serverID string) {
+	s.mu.Lock()
+	s.PendingServerID = serverID
+	s.mu.Unlock()
+}
 func (s *Session) UpdatePartial(partial string)   { s.mu.Lock(); s.Run.Partial = partial; s.mu.Unlock() }
 func (s *Session) SetBudget(budget events.Budget) { s.mu.Lock(); s.Budget = budget; s.mu.Unlock() }
 func (s *Session) SetQueuedMessages(count int)    { s.mu.Lock(); s.queuedMessages = count; s.mu.Unlock() }
